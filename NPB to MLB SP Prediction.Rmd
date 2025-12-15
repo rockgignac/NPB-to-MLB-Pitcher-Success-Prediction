@@ -1,0 +1,165 @@
+---
+title: "NPB to MLB Pitcher Prediction"
+author: "Rock Gignac"
+date: "`r Sys.Date()`"
+output: 
+html_document:
+  self_contained: yes
+  toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Project Goal
+
+Predict the expected MLB ERA+ of NPB pitchers based on their NPB performance and age, and identify skill profiles most likely to succeed.
+
+# Libraries
+``` {r}
+library(dplyr)
+library(forecast)
+library(corrgram)
+library(car)
+library(lmtest)
+library(ggplot2)
+```
+
+# Load Data
+``` {r}
+baseball <- read.csv("NPB_MLB_Prediction.csv", header = TRUE)
+head(baseball, 10)
+```
+## Filter Data & Select Variables
+``` {r}
+baseball_filter <- baseball[, -c(1:2,4)]
+```
+## Convert MLB.ERA.PLUS to numeric
+``` {r}
+baseball_filter$MLB.ERA.PLUS <- as.numeric(baseball_filter$MLB.ERA.PLUS)
+```
+# Train/Test Split
+``` {r}
+
+set.seed(666)
+train_index <- sample(1:nrow(baseball_filter), 0.6 * nrow(baseball_filter))
+valid_index <- setdiff(1:nrow(baseball_filter), train_index)
+
+train_df <- baseball_filter[train_index, ]
+valid_df <- baseball_filter[valid_index, ]
+
+nrow(train_df)
+nrow(valid_df)
+```
+## Explore Correlations
+``` {r}
+corrgram(train_df)
+```
+# Build Linear Regression Model
+``` {r}
+model <- lm(MLB.ERA.PLUS ~ MLB.Debut.Age + IP + K. + BB. + HR., data = train_df)
+summary(model)
+```
+## Check multicollinearity
+``` {r}
+vif(model)
+```
+## Normality of outcome
+``` {r}
+shapiro.test(sample(train_df$MLB.ERA.PLUS))
+```
+## Heteroscedasticity
+``` {r}
+bptest(model)
+```
+# Predict 2025 PL Pitchers
+``` {r}
+
+PL_2025_Pitcher <- read.csv("NPB_PL_2025.csv", header = TRUE)
+```
+## Calculate K%, BB%, HR%
+``` {r}
+PL_2025_Pitcher$K. <- PL_2025_Pitcher$SO / PL_2025_Pitcher$BF
+PL_2025_Pitcher$BB. <- PL_2025_Pitcher$BB / PL_2025_Pitcher$BF
+PL_2025_Pitcher$HR. <- PL_2025_Pitcher$HR / PL_2025_Pitcher$BF
+```
+## Rename columns
+``` {r}
+PL_2025_Pitcher <- PL_2025_Pitcher %>%
+rename(MLB.Debut.Age = Age, IP = IP.)
+PL_2025_Pitcher$MLB.Debut.Age <- as.numeric(PL_2025_Pitcher$MLB.Debut.Age)
+```
+## Predict MLB ERA+
+``` {r}
+PL_2025_Pitcher$Predicted_MLB_ERA_PLUS <- predict(model, newdata = PL_2025_Pitcher)
+```
+## Define MLB-ready criteria
+``` {r}
+PL_2025_Pitcher$MLB_Ready <- ifelse(
+PL_2025_Pitcher$Predicted_MLB_ERA_PLUS > 100 & PL_2025_Pitcher$IP > 100, 1, 0
+)
+```
+# Predict 2025 CL Pitchers
+``` {r}
+CL_2025_Pitcher <- read.csv("NPB_CL_2025.csv", header = TRUE)
+```
+## Calculate K%, BB%, HR%
+``` {r}
+CL_2025_Pitcher$K. <- CL_2025_Pitcher$SO / CL_2025_Pitcher$BF
+CL_2025_Pitcher$BB. <- CL_2025_Pitcher$BB / CL_2025_Pitcher$BF
+CL_2025_Pitcher$HR. <- CL_2025_Pitcher$HR / CL_2025_Pitcher$BF
+```
+## Rename columns
+``` {r}
+CL_2025_Pitcher <- CL_2025_Pitcher %>%
+rename(MLB.Debut.Age = Age, IP = IP.)
+CL_2025_Pitcher$MLB.Debut.Age <- as.numeric(CL_2025_Pitcher$MLB.Debut.Age)
+```
+## Predict MLB ERA+
+``` {r}
+CL_2025_Pitcher$Predicted_MLB_ERA_PLUS <- predict(model, newdata = CL_2025_Pitcher)
+```
+## Define MLB-ready criteria
+``` {r}
+CL_2025_Pitcher$MLB_Ready <- ifelse(
+CL_2025_Pitcher$Predicted_MLB_ERA_PLUS > 100 & CL_2025_Pitcher$IP > 100, 1, 0
+)
+```
+# Combine PL & CL and Filter MLB-Ready
+``` {r}
+MLB_Ready_All <- rbind(PL_2025_Pitcher, CL_2025_Pitcher)
+MLB_Ready <- subset(MLB_Ready_All, MLB_Ready == 1)
+```
+# Select essential columns
+``` {r}
+MLB_Ready <- MLB_Ready[, -c(1,4:17,19:35)]
+```
+# Sort by predicted ERA+
+``` {r}
+MLB_Ready <- MLB_Ready[order(-MLB_Ready$Predicted_MLB_ERA_PLUS), ]
+```
+
+# Visualizations
+``` {r}
+ggplot(MLB_Ready, aes(x=reorder(Name, -Predicted_MLB_ERA_PLUS), y=Predicted_MLB_ERA_PLUS)) +
+geom_col(fill="steelblue") +
+coord_flip() +
+labs(title="Predicted MLB ERA+ for 2025 NPB MLB-Ready Pitchers",
+x="Player", y="Predicted MLB ERA+") +
+theme_minimal()
+```
+# Show top 10
+``` {r}
+head(MLB_Ready, 10)
+```
+# Show all SP's ready for the MLB with their name and predicted ERA+
+```{r}
+MLB <- MLB_Ready[, -c(2:6)]
+MLB
+```
+
+The top ten NPB Starting Pitchers most likely to succeed in the MLB are
+```{r}
+head(MLB["Name"], 10)
+```
